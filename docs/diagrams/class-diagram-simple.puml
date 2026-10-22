@@ -1,0 +1,162 @@
+@startuml class-diagram-simple
+' Online Tickets - simplified UML class diagram (Lab 6, short version).
+' The full model is docs/diagrams/class-diagram.puml.
+' Lab checklist: 10+ classes with name, attributes, methods (parameters, visibility);
+' 4+ relation kinds; cardinality on every association; parameter direction (in/out/inout).
+' Visibility: + public, - private, # protected.
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam defaultFontSize 12
+skinparam nodesep 50
+skinparam ranksep 60
+hide empty members
+
+title Online Tickets - Class Diagram (simplified)
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  BOOKED
+  PAID
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  CARD
+  CASH
+}
+
+abstract class User {
+  # id: int
+  # name: string
+  # email: string
+  - passwordHash: string
+  + login(in email: string, in password: string): bool
+  + changePassword(in oldPassword: string, in newPassword: string): void
+}
+
+class Customer {
+  - paidOrders: int
+  + isLoyal(): bool
+  + getHistory(): Order[0..*]
+}
+
+class Cashier {
+  - boxOffice: string
+  + findBooking(in code: string): Order
+  + acceptCash(inout order: Order, in amount: decimal): bool
+}
+
+class Event {
+  - id: int
+  - title: string
+  - type: string
+  - description: string
+  + getSessions(in from: DateTime, in to: DateTime): Session[0..*]
+}
+
+class Session {
+  - id: int
+  - startsAt: DateTime
+  - basePrice: decimal
+  + canBook(in now: DateTime): bool
+  + isSeatFree(in seat: Seat): bool
+}
+
+class Venue {
+  - id: int
+  - name: string
+  - address: string
+  + getHalls(): Hall[1..*]
+}
+
+class Hall {
+  - id: int
+  - name: string
+  - capacity: int
+  + isSeated(): bool
+}
+
+class Seat {
+  - id: int
+  - row: int
+  - number: int
+  - zone: string
+  + getLabel(): string
+}
+
+class Order {
+  - id: int
+  - status: OrderStatus
+  - paymentMethod: PaymentMethod
+  - bookingCode: string
+  - total: decimal
+  - createdAt: DateTime
+  + addTicket(in ticket: Ticket): void
+  + calculateTotal(): decimal
+  + markPaid(in method: PaymentMethod): void
+  + cancel(): void
+  + refund(): void
+}
+
+class Ticket {
+  - id: int
+  - code: string
+  - price: decimal
+  + isActive(): bool
+}
+
+class Delivery {
+  - type: string
+  - address: string
+  - fee: decimal
+  + requestCourier(out trackingRef: string): bool
+}
+
+class OrderService {
+  + placeOrder(in customer: Customer, in seats: Seat[1..3], in method: PaymentMethod, out total: decimal): Order
+  + payByCard(inout order: Order, out redirectURL: string): bool
+  - releaseExpiredHolds(in now: DateTime): int
+}
+
+interface PaymentGateway <<interface>> {
+  + createPayment(in orderId: int, in amount: decimal, out redirectURL: string): string
+  + refund(in paymentRef: string, in amount: decimal): bool
+}
+
+class MockPaymentGateway {
+  - payments: Map<string, decimal>
+  + createPayment(in orderId: int, in amount: decimal, out redirectURL: string): string
+  + refund(in paymentRef: string, in amount: decimal): bool
+}
+
+' 1) Generalization
+User <|-- Customer
+User <|-- Cashier
+
+' 2) Realization (interface implementation)
+MockPaymentGateway ..|> PaymentGateway
+
+' 3) Composition (part cannot exist without the whole)
+Venue "1" *-- "1..*" Hall : contains >
+Hall "1" *-- "0..*" Seat : has >
+Event "1" *-- "1..*" Session : scheduled as >
+Order "1" *-- "1..*" Ticket : includes >
+Order "1" *-- "0..1" Delivery : delivered by >
+
+' 4) Aggregation (whole-part, parts live on their own)
+Customer "1" o-- "0..*" Order : places >
+
+' 5) Directed association
+Session "0..*" --> "1" Hall : held in >
+Ticket "0..*" --> "1" Session : admits to >
+Ticket "0..*" --> "0..1" Seat : for >
+OrderService "1" --> "1" PaymentGateway : uses >
+
+' 6) Dependency
+OrderService ..> Order : <<create>>
+Cashier ..> Order : <<use>>
+Order ..> OrderStatus
+Order ..> PaymentMethod
+
+@enduml

@@ -1,0 +1,147 @@
+@startuml use-case
+' Online Tickets — UML use case diagram (Lab 5)
+' Conventions: association = plain line (actor — use case);
+' include = base ..> included; extend = arrow from extending to base (condition in brackets);
+' generalization = arrow from child to parent; italic name = abstract use case or actor.
+' Extend arrows are written right-to-left (A <.. B) only to steer the layout;
+' the arrowhead, and so the UML meaning, is unchanged.
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+skinparam shadowing false
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam usecase {
+  BackgroundColor #FDFDFD
+  BorderColor #444444
+}
+skinparam rectangle {
+  BorderColor #222222
+}
+
+title Online Tickets — Use Case Diagram
+
+' ---------- actors on the left: customers and timer
+actor "Loyal Customer" as Loyal
+actor "Customer" as Customer
+actor "Guest" as Guest
+actor "Scheduler" as Clock <<timer>>
+
+rectangle "Online Tickets" {
+
+  package "Catalogue" {
+    usecase UC01 as "Browse Programme
+    --
+    extension points:
+    date filter"
+    usecase "Filter Programme by Date" as UC02
+    usecase "View Event Details" as UC03
+    usecase "View Session Seat Map" as UC04
+  }
+
+  package "Accounts" {
+    usecase "Register" as UC05
+    usecase "Sign In" as UC06
+    usecase "View Profile and Purchase History" as UC07
+  }
+
+  package "Ordering & Booking" {
+    usecase UC08 as "Buy Tickets
+    --
+    extension points:
+    add-on selection"
+    usecase "Buy Season Ticket" as UC09
+    usecase "Select Seats" as UC10
+    usecase "Check Ticket Limit" as UC11
+    usecase "Add Exhibition Add-on" as UC12
+    usecase "Choose Delivery Option" as UC13
+    usecase "Confirm Purchase" as UC14
+    usecase "//Pay for Order//" as UC15
+    usecase UC16 as "Pay by Card
+    --
+    extension points:
+    payment confirmed"
+    usecase "Pay Cash at Box Office" as UC17
+    usecase "Request Courier Delivery" as UC18
+    usecase "Book Tickets" as UC19
+    usecase "Pay for Booking Online" as UC20
+    usecase "Cancel Booking" as UC21
+    usecase "Expire Unpaid Bookings" as UC22
+    usecase "Request Refund" as UC28
+  }
+
+  package "Back Office" {
+    usecase "Find Booking by Code" as UC23
+    usecase "Manage Events" as UC24
+    usecase "Schedule Session and Set Prices" as UC25
+    usecase "Manage Venues and Seat Maps" as UC26
+    usecase "View Sales Report" as UC27
+  }
+}
+
+' ---------- actors on the right: staff and external systems
+actor "Cashier" as Cashier
+actor "Event Manager" as Manager
+actor "Administrator" as Admin
+actor "//Staff Member//" as Staff
+actor "Payment Provider" as PSP <<external system>>
+actor "Courier Service" as Courier <<external system>>
+
+' ---------- generalization of actors (child --|> parent)
+Loyal --|> Customer
+Customer --|> Guest
+Cashier --|> Staff
+Manager --|> Staff
+Admin --|> Staff
+
+' ---------- associations: primary actors (left)
+Guest -- UC01
+Guest -- UC03
+Guest -- UC04
+Guest -- UC05
+Guest -- UC06
+Customer -- UC07
+Customer -- UC08
+Customer -- UC19
+Customer -- UC20
+Customer -- UC21
+Customer -- UC28
+Loyal -- UC09
+Clock -- UC22
+
+' ---------- associations: staff and secondary actors (right)
+UC06 -- Staff
+UC23 -- Cashier
+UC17 -- Cashier
+UC24 -- Manager
+UC25 -- Manager
+UC27 -- Manager
+UC26 -- Admin
+UC16 -- PSP
+UC28 -- PSP
+UC18 -- Courier
+
+' ---------- include (base ..> included)
+UC08 ..> UC10 : <<include>>
+UC08 ..> UC11 : <<include>>
+UC08 ..> UC13 : <<include>>
+UC08 ..> UC14 : <<include>>
+UC08 ..> UC16 : <<include>>
+UC19 ..> UC10 : <<include>>
+UC19 ..> UC11 : <<include>>
+UC19 ..> UC13 : <<include>>
+UC19 ..> UC14 : <<include>>
+UC20 ..> UC16 : <<include>>
+UC17 ..> UC23 : <<include>>
+
+' ---------- extend (arrow from extending to base)
+UC01 <.. UC02 : <<extend>>\n[date range entered]
+UC08 <.. UC12 : <<extend>>\n[exhibition session]
+UC16 <.. UC18 : <<extend>>\n[order has courier delivery]
+
+' ---------- generalization of use cases (arrow from child to parent)
+UC09 --|> UC08
+UC16 --|> UC15
+UC17 --|> UC15
+
+@enduml

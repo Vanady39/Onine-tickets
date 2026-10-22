@@ -1,0 +1,465 @@
+@startuml class-diagram
+' Online Tickets - detailed UML class diagram (Lab 6).
+' Self-contained: paste into https://www.plantuml.com/plantuml or draw.io
+' (Arrange > Insert > Advanced > PlantUML). No includes, themes or sprites.
+' Source of truth: backend/internal/{domain,app,store,payment,courier,httpapi}
+' and backend/internal/store/migrations/001_init.sql.
+' Conventions: - attribute, + operation, {static} = Go package-level constant or function,
+' / derived attribute; *-- composition, --> directed association (navigability),
+' <|-- generalization (Go struct embedding), ..|> interface realization, ..> dependency.
+' Foreign-key IDs and display copies (eventTitle, venueName, ...) are drawn as associations.
+' Omitted: the context.Context parameter, a trailing Go error result when the operation
+' has another result, and the Now (Clock) and Log fields of the services.
+' Parameter direction is explicit: in = input, out = output (Go extra return value), inout = modified in place.
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontSize 12
+skinparam nodesep 40
+skinparam ranksep 50
+hide empty members
+
+title Online Tickets - Class Diagram
+
+package "adapters" {
+  class "httpapi.Server" as Server <<REST/JSON>> {
+    + Handler(): http.Handler
+    - require(in roles: Role [1..*]): middleware
+  }
+  class "store.Store" as Store <<PostgreSQL>> {
+    + {static} Open(in url: string): Store
+    + Migrate(): error
+  }
+  class "payment.Mock" as PaymentMock <<mock>> {
+    - payments: map[string]payment
+    - onResult: ResultHandler
+    + Handler(): http.Handler
+  }
+  class "courier.Mock" as CourierMock <<mock>>
+}
+
+package "app (application services and ports)" {
+  class CatalogService {
+    + Events(in f: EventFilter): Event [0..*]
+    + Event(in id: int64): Event
+    + Session(in id: int64): Session
+    + SeatMap(in sessionID: int64): SeatState [0..*]
+  }
+  class AccountService {
+    + {static} TokenTTL: duration = 24 h
+    - jwtSecret: byte [1..*]
+    + Register(in name: string, in email: string, in password: string): User
+    + CreateStaff(in name: string, in email: string, in password: string, in role: Role): User
+    + Login(in email: string, in password: string, out token: string): User
+    + Authenticate(in token: string, out userID: int64, out role: Role)
+    + Profile(in userID: int64): Profile
+  }
+  class OrderService {
+    + PlaceOrder(in customerID: int64, in req: OrderRequest): Order
+    + Order(in customerID: int64, in orderID: int64): Order
+    + History(in customerID: int64): Order [0..*]
+    + StartCardPayment(in customerID: int64, in orderID: int64, out redirectURL: string)
+    + ConfirmPayment(in ref: string, in status: string, in signature: string): error
+    + Cancel(in customerID: int64, in orderID: int64): Order
+    + Refund(in customerID: int64, in orderID: int64): Order
+    - requestDelivery(in o: Order)
+  }
+  class BoxOfficeService {
+    + FindBooking(in code: string): Order
+    + AcceptCash(in cashierID: int64, in code: string): Order
+  }
+  class BackOfficeService {
+    + Events(): Event [0..*]
+    + CreateEvent(in e: Event): Event
+    + UpdateEvent(in e: Event): Event
+    + CreateSession(in managerID: int64, in ns: NewSession): int64
+    + Venues(): Venue [0..*]
+    + CreateVenue(in name: string, in address: string, in halls: HallSpec [1..*]): int64
+    + SalesReport(in eventID: int64): EventReport
+  }
+  class ExpiryJob {
+    + RunOnce(): int
+    + Run(in interval: duration)
+  }
+
+  interface Repository <<port>> {
+    .. catalogue ..
+    + ListEvents(in f: EventFilter, in now: time): Event [0..*]
+    + GetEvent(in id: int64, in now: time): Event
+    + Session(in id: int64): Session
+    + Sessions(in ids: int64 [1..*]): map[int64]Session
+    + SeatZones(in seatIDs: int64 [0..*]): map[int64]SeatZone
+    + SeatMap(in sessionID: int64): SeatState [0..*]
+    .. users ..
+    + CreateUser(in u: User): User
+    + UserByEmail(in email: string): User
+    + UserByID(in id: int64): User
+    + PaidOrderCount(in customerID: int64): int
+    .. orders ..
+    + CreateOrder(inout o: Order): error
+    + GetOrder(in id: int64): Order
+    + OrderByBookingCode(in code: string): Order
+    + OrderByPaymentRef(in ref: string): Order
+    + CustomerOrders(in customerID: int64): Order [0..*]
+    + UpdateOrder(in id: int64, in fn: func(inout o: Order): error): Order
+    + ExpireDue(in now: time): int
+    .. back office ..
+    + CreateEvent(in e: Event): Event
+    + UpdateEvent(in e: Event): Event
+    + AllEvents(): Event [0..*]
+    + CreateSession(in ns: NewSession): int64
+    + CreateVenue(in name: string, in address: string, in halls: HallSpec [1..*]): int64
+    + Venues(): Venue [0..*]
+    + SalesReport(in eventID: int64): EventReport
+    .. audit (NFR-12) ..
+    + Audit(in userID: int64, in action: string, in details: string): error
+  }
+  interface PaymentGateway <<port>> {
+    + CreatePayment(in orderID: int64, in amount: Money, out ref: string, out redirectURL: string)
+    + VerifyCallback(in ref: string, in status: string, in signature: string): bool
+    + Refund(in ref: string, in amount: Money): error
+  }
+  interface CourierService <<port>> {
+    + RequestDelivery(in req: DeliveryRequest, out ref: string)
+  }
+  class DeliveryRequest <<DTO>> {
+    - orderID: int64
+    - address: string
+    - ticketCodes: string [1..*]
+  }
+}
+
+package "domain" {
+
+  enum EventType {
+    concert
+    cinema
+    theatre
+    exhibition
+    --
+    + Valid(): bool
+  }
+
+  enum HallKind {
+    seated
+    general_admission
+  }
+
+  enum AddOnKind {
+    business_lunch
+    masterclass
+    presentation
+    --
+    + Valid(): bool
+  }
+
+  enum SeatStatus {
+    free
+    held
+    sold
+  }
+
+  enum Role {
+    customer
+    cashier
+    manager
+    admin
+    --
+    + Valid(): bool
+  }
+
+  enum OrderStatus {
+    pending_payment
+    booked
+    paid
+    cancelled
+    expired
+    refunded
+    --
+    + Active(): bool
+  }
+
+  enum PaymentMethod {
+    card
+    cash
+  }
+
+  enum DeliveryOption {
+    e_ticket
+    courier
+  }
+
+  class Money <<value object>> {
+    - kopecks: int64
+    + {static} RUB(in roubles: int64): Money
+    + String(): string
+  }
+
+  class Venue {
+    - id: int64
+    - name: string
+    - address: string
+  }
+
+  class Hall {
+    - id: int64
+    - name: string
+    - kind: HallKind
+    - capacity: int
+    + IsSeated(): bool
+  }
+
+  class PriceZone {
+    - id: int64
+    - name: string
+  }
+
+  class Seat {
+    - id: int64
+    - row: int
+    - number: int
+  }
+
+  class Event {
+    - id: int64
+    - title: string
+    - type: EventType
+    - description: string
+    - durationMin: int
+    - ageRating: string
+    - imageURL: string
+    - /nextSessionAt: time [0..1]
+    - /minPrice: Money [0..1]
+  }
+
+  class Session {
+    + {static} BookingWindow: duration = 24 h
+    - id: int64
+    - startsAt: time
+    - basePrice: Money
+    - /remaining: int
+    + BookingDeadline(): time
+    + CanBook(in now: time): bool
+    + Started(in now: time): bool
+    + PriceForZone(in zoneID: int64, out price: Money): bool
+    + AddOn(in id: int64, out addOn: AddOnService): bool
+  }
+
+  class ZonePrice {
+    - price: Money
+  }
+
+  class AddOnService {
+    - id: int64
+    - kind: AddOnKind
+    - name: string
+    - price: Money
+    - capacity: int
+    - /remaining: int
+  }
+
+  class User {
+    - id: int64
+    - email: string
+    - name: string
+    - role: Role
+    - passwordHash: string
+    - createdAt: time
+  }
+
+  class Profile <<read model>> {
+    - paidOrders: int
+    - loyal: bool
+  }
+
+  class SeatState <<read model>> {
+    - price: Money
+    - status: SeatStatus
+  }
+
+  class Order {
+    + {static} HoldDuration: duration = 10 min
+    - id: int64
+    - status: OrderStatus
+    - paymentMethod: PaymentMethod
+    - bookingCode: string [0..1]
+    - bookingDeadline: time
+    - holdExpiresAt: time [0..1]
+    - paymentRef: string [0..1]
+    - total: Money
+    - createdAt: time
+    - paidAt: time [0..1]
+    + IsSeasonTicket(): bool
+    + MarkPaid(in method: PaymentMethod, in now: time): error
+    + Cancel(): error
+    + Expire(in now: time): error
+    + Refund(in now: time): error
+    - deactivate()
+  }
+
+  class Ticket {
+    - id: int64
+    - code: string
+    - price: Money
+    - active: bool
+    + Total(): Money
+  }
+
+  class TicketAddOn {
+    - name: string
+    - price: Money
+  }
+
+  class Delivery {
+    + {static} CourierFee: Money = 300 RUB
+    - option: DeliveryOption
+    - address: string [0..1]
+    - fee: Money
+    - courierRef: string [0..1]
+    - status: string [0..1] {requested, delivered, failed}
+  }
+
+  class Policies <<utility>> {
+    + {static} MaxTicketsPerEvent: int = 3
+    + {static} LoyaltyThreshold: int = 3
+    + {static} IsLoyal(in paidOrders: int): bool
+    + {static} BuildOrder(in customerID: int64, in paidOrders: int, in req: OrderRequest, in sessions: map[int64]Session, in seatZones: map[int64]SeatZone, in now: time): Order
+  }
+
+  class OrderRequest <<input>> {
+    - paymentMethod: PaymentMethod
+    - book: bool
+    - deliveryOption: DeliveryOption
+    - deliveryAddress: string [0..1]
+  }
+
+  class OrderItem <<input>> {
+    - sessionID: int64
+    - seatID: int64 [0..1]
+    - addOnIDs: int64 [0..*]
+  }
+
+  class SeatZone <<input>> {
+    - hallID: int64
+    - zoneID: int64
+  }
+
+  class EventFilter <<input>> {
+    - type: EventType [0..1]
+    - from: time [0..1]
+    - to: time [0..1]
+  }
+
+  class NewSession <<input>> {
+    - eventID: int64
+    - hallID: int64
+    - startsAt: time
+    - basePrice: Money
+    - prices: ZonePrice [0..*]
+    - addOns: AddOnService [0..*]
+  }
+
+  class HallSpec <<input>> {
+    - name: string
+    - kind: HallKind
+    - capacity: int
+  }
+
+  class ZoneSpec <<input>> {
+    - name: string
+    - rows: int
+    - seatsPerRow: int
+  }
+
+  class EventReport <<read model>> {
+    - eventID: int64
+    - title: string
+    - ticketsSold: int
+    - revenue: Money
+  }
+
+  class SessionReport <<read model>> {
+    - sessionID: int64
+    - startsAt: time
+    - venueName: string
+    - hallName: string
+    - capacity: int
+    - ticketsSold: int
+    - revenue: Money
+    - occupancy: float64
+  }
+
+  note top of Order
+    {tickets per event <= 3}
+    {IsSeasonTicket() = tickets of >= 2 events;
+     allowed only if IsLoyal(paidOrders)}
+    {bookingDeadline = earliest startsAt - 24 h}
+    {courier delivery => paymentMethod = card}
+  end note
+
+  note bottom of Ticket
+    {at most one active Ticket per (session, seat)}
+    {active = order.status.Active()}
+    {add-ons only for exhibition sessions}
+  end note
+}
+
+' ================= domain: catalogue
+Venue "1" *-- "0..*" Hall
+Hall "1" *-- "0..*" PriceZone
+Hall "1" *-- "0..*" Seat
+Seat "0..*" --> "1" PriceZone : zone >
+Event "1" *-- "0..*" Session : scheduled as >
+Session "0..*" --> "1" Hall : takes place in >
+Session "0..*" -- "0..*" PriceZone : priced in >
+(Session, PriceZone) .. ZonePrice
+Session "1" *-- "0..*" AddOnService : offers >
+Seat <|-- SeatState
+
+' ================= domain: users and orders
+User <|-- Profile
+Order "0..*" --> "1" User : customer >
+Order "1" *-- "1..*" Ticket
+Order "1" *-- "1" Delivery
+Ticket "0..*" --> "1" Session : admits to >
+Ticket "0..*" --> "0..1" Seat : for >
+Ticket "0..*" -- "0..*" AddOnService : includes >
+(Ticket, AddOnService) .. TicketAddOn
+
+' ================= domain: inputs, factory, reports
+OrderRequest "1" *-- "1..*" OrderItem
+HallSpec "1" *-- "0..*" ZoneSpec
+EventReport "1" *-- "0..*" SessionReport
+Policies ..> OrderRequest
+Policies ..> Session
+Policies ..> SeatZone
+Policies ..> Order : <<create>>
+
+' ================= app
+CatalogService "1" --> "1" Repository
+AccountService "1" --> "1" Repository
+OrderService "1" --> "1" Repository
+BoxOfficeService "1" --> "1" Repository
+BackOfficeService "1" --> "1" Repository
+ExpiryJob "1" --> "1" Repository
+OrderService "1" --> "1" PaymentGateway
+OrderService "1" --> "1" CourierService
+CourierService ..> DeliveryRequest
+AccountService ..> Policies : IsLoyal
+OrderService ..> Policies : BuildOrder
+
+' ================= adapters
+Store ..|> Repository
+PaymentMock ..|> PaymentGateway
+CourierMock ..|> CourierService
+PaymentMock ..> OrderService : <<callback>> ConfirmPayment
+Server "1" --> "1" CatalogService
+Server "1" --> "1" AccountService
+Server "1" --> "1" OrderService
+Server "1" --> "1" BoxOfficeService
+Server "1" --> "1" BackOfficeService
+
+' layout only (no semantics): app above domain
+DeliveryRequest -[hidden]down- Policies
+Repository -[hidden]down- Event
+@enduml

@@ -1,0 +1,85 @@
+@startuml class-overview
+' Online Tickets - class diagram overview (Lab 6): layers and main classes, no members.
+' Self-contained: paste into https://www.plantuml.com/plantuml or draw.io
+' (Arrange > Insert > Advanced > PlantUML). Full detail: class-diagram.puml.
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam defaultFontSize 13
+hide members
+hide circle
+
+title Online Tickets - Class Diagram Overview
+
+package "adapters" {
+  class "httpapi.Server" as Server
+  class "store.Store" as Store <<PostgreSQL>>
+  class "payment.Mock" as PaymentMock <<mock>>
+  class "courier.Mock" as CourierMock <<mock>>
+}
+
+package "app" {
+  class CatalogService
+  class AccountService
+  class OrderService
+  class BoxOfficeService
+  class BackOfficeService
+  class ExpiryJob
+  interface Repository <<port>>
+  interface PaymentGateway <<port>>
+  interface CourierService <<port>>
+}
+
+package "domain" {
+  class Venue
+  class Hall
+  class Seat
+  class PriceZone
+  class Event
+  class Session
+  class AddOnService
+  class User
+  class Order
+  class Ticket
+  class Delivery
+  class Policies <<utility>>
+}
+
+Server --> CatalogService
+Server --> AccountService
+Server --> OrderService
+Server --> BoxOfficeService
+Server --> BackOfficeService
+
+CatalogService --> Repository
+AccountService --> Repository
+OrderService --> Repository
+BoxOfficeService --> Repository
+BackOfficeService --> Repository
+ExpiryJob --> Repository
+OrderService --> PaymentGateway
+OrderService --> CourierService
+OrderService ..> Policies : BuildOrder
+
+Store ..|> Repository
+PaymentMock ..|> PaymentGateway
+CourierMock ..|> CourierService
+
+Venue "1" *-- "0..*" Hall
+Hall "1" *-- "0..*" Seat
+Hall "1" *-- "0..*" PriceZone
+Event "1" *-- "0..*" Session
+Session "0..*" --> "1" Hall
+Session "1" *-- "0..*" AddOnService
+Order "0..*" --> "1" User
+Order "1" *-- "1..*" Ticket
+Order "1" *-- "1" Delivery
+Ticket "0..*" --> "1" Session
+Ticket "0..*" --> "0..1" Seat
+Seat "0..*" --> "1" PriceZone
+Policies ..> Order : <<create>>
+
+' layout only (no semantics): app above domain
+Repository -[hidden]down- Policies
+PaymentGateway -[hidden]down- Event
+@enduml
